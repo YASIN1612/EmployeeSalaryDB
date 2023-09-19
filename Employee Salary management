@@ -1,0 +1,390 @@
+
+
+//python code for Employee Salary management details.
+
+import sys
+import mysql.connector
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,QLineEdit, QTableWidget, QTableWidgetItem, QFormLayout, QComboBox, QDialog, QMessageBox
+from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtGui import QPalette, QColor
+
+
+# Create a MySQL database connection
+def create_db_connection():
+    conn = mysql.connector.connect(
+        host='localhost',  # Replace with your MySQL server hostname
+        user='root',  # Replace with your MySQL username
+        password='Your_password',  # Replace with your MySQL password
+        database='EmployeeSalaryDB'  # Replace with the name of your MySQL database
+    )
+    return conn
+
+
+# Create the Employees table if it doesn't exist
+def create_employees_table(conn):
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Employees (
+            EmployeeID INT AUTO_INCREMENT PRIMARY KEY,
+            FirstName VARCHAR(50),
+            LastName VARCHAR(50),
+            Position VARCHAR(50),
+            Email VARCHAR(100),          
+            PhoneNumber VARCHAR(20)      
+        )
+    """)
+    conn.commit()
+    cursor.close()
+
+# Create the Salary table if it doesn't exist
+def create_salary_table(conn):
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Salary (
+            SalaryID INT AUTO_INCREMENT PRIMARY KEY,
+            EmployeeID INT,
+            SalaryAmount DECIMAL(10, 2),
+            MonthYear DATE,
+            FOREIGN KEY (EmployeeID) REFERENCES Employees(EmployeeID)
+        )
+    """)
+    conn.commit()
+    cursor.close()
+
+
+# Function to add a new employee
+def add_employee():
+    first_name = first_name_entry.text()
+    last_name = last_name_entry.text()
+    position = position_combo.currentText()
+    email = email_entry.text()
+    phone_number = phone_number_entry.text()
+
+    if not first_name or not last_name or not position or not email or not phone_number:
+        show_error("Error", "All fields must be filled.")
+        return
+
+    conn = create_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("INSERT INTO Employees (FirstName, LastName, Position, Email, PhoneNumber) VALUES (%s, %s, %s, %s, %s)",
+                   (first_name, last_name, position, email, phone_number))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    first_name_entry.clear()
+    last_name_entry.clear()
+    email_entry.clear()
+    phone_number_entry.clear()
+
+    update_table()
+
+
+# Function to update the table with employee data
+def update_table():
+    table.setRowCount(0)
+
+    conn = create_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT EmployeeID, FirstName, LastName, Position, Email, PhoneNumber FROM Employees")
+    employees = cursor.fetchall()
+
+    for row, employee in enumerate(employees):
+        table.insertRow(row)
+        for col, data in enumerate(employee):
+            item = QTableWidgetItem(str(data))
+            table.setItem(row, col, item)
+
+    cursor.close()
+    conn.close()
+
+
+# Function to display salary information for the selected employee
+def display_salary():
+    selected_item = table.selectedItems()
+
+    if not selected_item:
+        show_error("Error", "Please select an employee.")
+        return
+
+    employee_id = selected_item[0].text()
+
+    conn = create_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT SalaryAmount, MonthYear FROM Salary WHERE EmployeeID = %s", (employee_id,))
+    salary_records = cursor.fetchall()
+
+    salary_dialog = QDialog()
+    salary_dialog.setWindowTitle("Salary Information for Employee ID: " + employee_id)
+
+    salary_layout = QVBoxLayout()
+    salary_dialog.setLayout(salary_layout)
+
+    salary_table = QTableWidget()
+    salary_table.setColumnCount(2)
+    salary_table.setHorizontalHeaderLabels(["Salary Amount", "Month-Year"])
+
+    for row, record in enumerate(salary_records):
+        salary_table.insertRow(row)
+        for col, data in enumerate(record):
+            item = QTableWidgetItem(str(data))
+            salary_table.setItem(row, col, item)
+
+    salary_layout.addWidget(salary_table)
+    salary_dialog.exec_()
+
+
+# Function to edit employee details
+def edit_employee():
+    selected_item = table.selectedItems()
+
+    if not selected_item:
+        show_error("Error", "Please select an employee to edit.")
+        return
+
+    employee_id = selected_item[0].text()
+
+    conn = create_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT FirstName, LastName, Position FROM Employees WHERE EmployeeID = %s", (employee_id,))
+    employee_details = cursor.fetchone()
+
+    edit_dialog = QDialog()
+    edit_dialog.setWindowTitle("Edit Employee Details")
+
+    edit_layout = QFormLayout()
+    edit_dialog.setLayout(edit_layout)
+
+    first_name_edit = QLineEdit(employee_details[0])
+    last_name_edit = QLineEdit(employee_details[1])
+    position_edit = QComboBox()
+    position_edit.addItems(["Manager", "Engineer", "Designer", "Analyst", "Tester", "Drought Man"])
+    position_edit.setCurrentText(employee_details[2])
+
+    edit_layout.addRow("First Name:", first_name_edit)
+    edit_layout.addRow("Last Name:", last_name_edit)
+    edit_layout.addRow("Position:", position_edit)
+
+    save_button = QPushButton("Save Changes")
+
+    def save_changes():
+        new_first_name = first_name_edit.text()
+        new_last_name = last_name_edit.text()
+        new_position = position_edit.currentText()
+
+        if not new_first_name or not new_last_name or not new_position:
+            show_error("Error", "All fields must be filled.")
+            return
+
+        cursor.execute("UPDATE Employees SET FirstName = %s, LastName = %s, Position = %s WHERE EmployeeID = %s",
+                       (new_first_name, new_last_name, new_position, employee_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        edit_dialog.accept()
+        update_table()
+
+    save_button.clicked.connect(save_changes)
+    edit_layout.addRow(save_button)
+
+    edit_dialog.exec_()
+
+
+# Function to add salary records for an employee
+def add_salary():
+    selected_item = table.selectedItems()
+
+    if not selected_item:
+        show_error("Error", "Please select an employee.")
+        return
+
+    employee_id = selected_item[0].text()
+
+    # Create a salary dialog
+    salary_dialog = QDialog()
+    salary_dialog.setWindowTitle("Add Salary Record for Employee ID: " + employee_id)
+
+    # Create a layout for the dialog
+    salary_layout = QFormLayout()
+    salary_dialog.setLayout(salary_layout)
+
+    # Add input fields for salary amount and month-year
+    salary_amount_entry = QLineEdit()
+    month_year_entry = QLineEdit()  # Use a line edit for month-year input
+
+    salary_layout.addRow("Salary Amount:", salary_amount_entry)
+    salary_layout.addRow("Month-Year (YYYY-MM):", month_year_entry)  # Ask the user to input in YYYY-MM format
+
+    # Create a save button
+    save_button = QPushButton("Save Salary Record")
+
+    # Define a function to save the salary record
+    def save_salary_record():
+        amount = salary_amount_entry.text()
+        month_year = month_year_entry.text()  # Get the user-inputted month-year
+
+        if not amount or not month_year:
+            show_error("Error", "Please fill in all fields.")
+            return
+
+        # Insert the salary record into the database
+        conn = create_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO Salary (EmployeeID, SalaryAmount, MonthYear) VALUES (%s, %s, %s)",
+                       (employee_id, amount, month_year))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        salary_dialog.accept()
+        update_table()  # Update the table to reflect the new salary record
+
+    # Connect the save button to the save_salary_record function
+    save_button.clicked.connect(save_salary_record)
+
+    # Add the save button to the layout
+    salary_layout.addRow(save_button)
+
+    # Show the salary dialog
+    salary_dialog.exec_()
+
+
+# Function to display an error message
+def show_error(title, message):
+    error_box = QMessageBox()
+    error_box.setIcon(QMessageBox.Critical)
+    error_box.setWindowTitle(title)
+    error_box.setText(message)
+    error_box.exec_()
+
+
+# Create the main application
+app = QApplication(sys.argv)
+window = QMainWindow()
+window.setWindowTitle("Employee Salary Management")
+window.setGeometry(100, 100, 800, 400)
+
+central_widget = QWidget()
+window.setCentralWidget(central_widget)
+
+layout = QVBoxLayout()
+central_widget.setLayout(layout)
+
+# Employee input form
+form_layout = QFormLayout()
+first_name_entry = QLineEdit()
+last_name_entry = QLineEdit()
+position_combo = QComboBox()
+position_combo.addItems(["Manager", "Engineer", "Designer", "Analyst", "Tester", "Drought Man"])
+email_entry = QLineEdit()
+phone_number_entry = QLineEdit()
+
+form_layout.addRow("First Name:", first_name_entry)
+form_layout.addRow("Last Name:", last_name_entry)
+form_layout.addRow("Position:", position_combo)
+form_layout.addRow("Email:", email_entry)  
+form_layout.addRow("Phone Number:", phone_number_entry)  
+
+
+add_button = QPushButton("Add Employee")
+add_button.clicked.connect(add_employee)
+
+form_layout.addRow(add_button)
+
+layout.addLayout(form_layout)
+
+# Employee table
+table = QTableWidget()
+table.setColumnCount(4)
+table.setHorizontalHeaderLabels(["Employee ID", "First Name", "Last Name", "Position"])
+table.horizontalHeader().setStretchLastSection(True)
+table.setSelectionBehavior(QTableWidget.SelectRows)
+table.setSelectionMode(QTableWidget.SingleSelection)
+table.itemClicked.connect(display_salary)
+
+layout.addWidget(table)
+
+# Edit and add salary buttons
+button_layout = QHBoxLayout()
+edit_button = QPushButton("Edit Employee")
+edit_button.clicked.connect(edit_employee)
+add_salary_button = QPushButton("Add Salary Record")
+add_salary_button.clicked.connect(add_salary)
+
+button_layout.addWidget(edit_button)
+button_layout.addWidget(add_salary_button)
+
+layout.addLayout(button_layout)
+
+
+
+# Dracula Theme Stylesheet
+stylesheet = """
+    /* Dracula Theme Stylesheet */
+
+    /* Background color for the main window */
+    QWidget {
+        background-color: #282a36; /* Dracula background color */
+        color: #f8f8f2; /* Dracula text color */
+    }
+
+    /* Buttons */
+    QPushButton {
+        background-color: #6272a4; /* Dracula button color */
+        color: #f8f8f2; /* White text color */
+        border: none;
+        padding: 5px 10px;
+    }
+
+    QPushButton:hover {
+        background-color: #44475a; /* Slightly darker button color on hover */
+    }
+
+    /* LineEdits and ComboBoxes */
+    QLineEdit, QComboBox {
+        background-color: #44475a; /* Dracula input field color */
+        border: 1px solid #282a36; /* Slightly lighter border */
+        color: #f8f8f2; /* Dracula text color */
+        padding: 6px;
+    }
+
+    /* TableWidget (table) */
+    QTableWidget {
+        background-color: #44475a; /* Dracula table background color */
+        alternate-background-color: #282a36; /* Slightly darker alternate rows */
+        color: #f8f8f2; /* Dracula text color */
+    }
+
+    /* Table Headers */
+    QHeaderView::section {
+        background-color: #44475a; /* Dracula header background color */
+        color: #f8f8f2; /* Dracula text color */
+        padding: 3px;
+    }
+
+    /* Selected items in the table */
+    QTableWidget::item:selected {
+        background-color: #bd93f9; /* Dracula selection color */
+        color: #282a36; /* Dracula text color on selection */
+
+
+    }
+"""
+
+app.setStyleSheet(stylesheet)
+
+# Create database tables if they don't exist
+conn = create_db_connection()
+create_employees_table(conn)
+create_salary_table(conn)
+conn.close()
+
+# Initial data retrieval and display
+update_table()
+
+window.show()
+sys.exit(app.exec_())
